@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal Pindaan Pensyarah (Semakan MQA)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .file-drop-zone {
+            border: 2px dashed #cbd5e1;
+            transition: all 0.3s ease;
+        }
+        .file-drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .hidden-input {
+            display: none;
+        }
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
+
+    <!-- Chosen Palette: Warm Neutrals with Action Accents (Slate-50 bg, Slate-800 text, Blue-600 primary, Emerald-600 success, Rose-500 alerts) -->
+    <!-- Application Structure Plan: The SPA is structured as a role-based dashboard using the newly uploaded MQA course coordinator matching report. It starts with a top navigation bar showing user context with a dynamically populated dropdown of actual lecturers. The main content is split into: 1) A High-Level Overview (audit stats and a dynamic Chart.js doughnut chart displaying issue types) and 2) The Actionable Dashboard (card-based layout representing individual courses requiring amendments with detailed issue feedback). A modal explains the technical Google Drive integration logic. Gemini API integration is directly built into each course card as an expansion pane to offer on-demand syllabus suggestions and compliance checking. -->
+    <!-- Visualization & Content Choices: 1. Overview Chart -> Goal: Compare & Inform -> Method: Chart.js Doughnut Chart -> Interaction: Hover tooltips -> Justification: Communicates the relative frequency of academic issues (Mapping, References, Syllabus). 2. Course Cards -> Goal: Organize & Change -> Method: HTML/Tailwind Cards with dynamic states -> Interaction: File upload, dynamic AI assistant tabs, and simulated submit -> Justification: Offers a clean personal working area with context-specific AI tools. 3. Gemini Suggestions & Compliance Check -> Goal: Support & Inform -> Method: Gemini 2.5 Flash API calls with automatic exponential backoff -> Interaction: Accordion toggle, dynamic prompt engineering, copy-to-clipboard, compliance checking -> Justification: Assists academic staff in meeting specific MQA guidelines. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+
+    <nav class="bg-slate-900 text-white shadow-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <div class="flex items-center space-x-3">
+                    <span class="text-2xl">🎓</span>
+                    <span class="font-bold text-base sm:text-lg tracking-tight">Portal Pindaan MQA</span>
+                </div>
+                <div class="flex items-center space-x-2 sm:space-x-4">
+                    <a href="https://drive.google.com/drive/folders/16sy-DoM9_McJQjd5599Jh3rS7ji7u4aV?usp=sharing" target="_blank" class="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1.5 rounded-md text-xs sm:text-sm font-semibold transition-colors flex items-center gap-1">
+                        <span>📁</span> <span class="hidden xs:inline">Folder</span> Drive
+                    </a>
+                    <button id="btn-tech-info" class="text-slate-300 hover:text-white px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors">
+                        ℹ️ <span class="hidden sm:inline">Logik Teknikal</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        
+        <div id="toast-container" class="fixed top-20 right-4 z-50 flex flex-col space-y-2"></div>
+
+        <!-- Section 1: Overview Summary -->
+        <section id="section-overview" class="mb-8 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <header class="mb-6">
+                <h2 class="text-2xl font-bold text-slate-800 mb-2">Ringkasan Penemuan Audit MQA</h2>
+                <p class="text-slate-600 text-sm leading-relaxed max-w-3xl">
+                    Seksyen ini membentangkan gambaran keseluruhan isu-isu kualiti akademik yang dikenal pasti daripada dokumen padanan penyelaras kursus MQA yang lengkap (32 rekod keseluruhan). Visualisasi di bawah membahagikan isu mengikut kategori rujukan, pemetaan transferable skill, dan isu sinopsis bagi memudahkan pemantauan peringkat jabatan.
+                </p>
+            </header>
+            
+            <div class="flex flex-col md:flex-row gap-8 items-center justify-center">
+                <div class="w-full md:w-1/2 flex justify-center">
+                    <div class="chart-container">
+                        <canvas id="issuesChart"></canvas>
+                    </div>
+                </div>
+                <div class="w-full md:w-1/2 grid grid-cols-2 gap-4">
+                    <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                        <div class="text-3xl font-bold text-blue-700 mb-1" id="stat-total">0</div>
+                        <div class="text-sm text-blue-900 font-medium">Jumlah Kursus Terlibat</div>
+                    </div>
+                    <div class="bg-rose-50 p-4 rounded-lg border border-rose-100">
+                        <div class="text-3xl font-bold text-rose-700 mb-1" id="stat-pending">0</div>
+                        <div class="text-sm text-rose-900 font-medium">Menunggu Pindaan</div>
+                    </div>
+                    <div class="bg-emerald-50 p-4 rounded-lg border border-emerald-100">
+                        <div class="text-3xl font-bold text-emerald-700 mb-1" id="stat-completed">0</div>
+                        <div class="text-sm text-emerald-900 font-medium">Pindaan Selesai</div>
+                    </div>
+                    <div class="bg-amber-50 p-4 rounded-lg border border-amber-100">
+                        <div class="text-3xl font-bold text-amber-700 mb-1">32 Kursus</div>
+                        <div class="text-sm text-amber-900 font-medium">Penyelarasan Rasmi</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: Dashboard with Search & Filters -->
+        <section id="section-dashboard">
+            <header class="mb-6 border-b border-slate-200 pb-4">
+                <h2 class="text-2xl font-bold text-slate-800 mb-2">Papan Pemuka Tindakan Kursus</h2>
+                <p class="text-slate-600 text-sm leading-relaxed mb-6">
+                    Senarai lengkap tugasan pindaan kurikulum mengikut penyelarasan penuh kursus. Gunakan fungsi penapis di bawah untuk mencari nama pensyarah, jenis isu, atau kod kursus spesifik anda. Semua dokumen yang berjaya dihantar akan direkodkan dan boleh disemak di folder Google Drive sasaran yang telah ditetapkan.
+                </p>
+
+                <!-- Filters Panel -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-100 p-4 rounded-xl border border-slate-200">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase">Cari Kursus / Isu:</label>
+                        <input id="search-input" type="text" placeholder="Masukkan kod, nama atau ulasan..." class="w-full text-xs px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase">Tapis Penyelaras Kursus:</label>
+                        <select id="user-selector" class="w-full text-xs px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                            <option value="all">Semua Pensyarah / Penyelaras</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5 uppercase">Kategori Isu MQA:</label>
+                        <select id="issue-selector" class="w-full text-xs px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                            <option value="all">Semua Isu</option>
+                            <option value="Isu Pemetaan">Isu Pemetaan</option>
+                            <option value="Isu Rujukan">Isu Rujukan</option>
+                            <option value="Isu Sinopsis">Isu Sinopsis</option>
+                            <option value="Isu Penilaian">Isu Penilaian / Campuran</option>
+                        </select>
+                    </div>
+                </div>
+            </header>
+
+            <div id="course-grid" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            </div>
+            
+            <div id="empty-state" class="hidden text-center py-16 bg-white rounded-xl shadow-sm border border-slate-200">
+                <div class="text-5xl mb-4">🎉</div>
+                <h3 class="text-xl font-bold text-slate-700">Tiada Tugasan Ditemui</h3>
+                <p class="text-slate-500 mt-2">Semak semula kata kunci atau penapis aktif anda.</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- Tech Specs Modal -->
+    <div id="tech-modal" class="fixed inset-0 bg-slate-900/50 hidden z-50 flex items-center justify-center backdrop-blur-sm p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-200">
+            <div class="flex justify-between items-center p-6 border-b border-slate-100">
+                <h3 class="text-xl font-bold text-slate-800">Arkitektur Sistem & Integrasi Google Drive</h3>
+                <button id="btn-close-modal" class="text-slate-400 hover:text-slate-600 text-2xl font-bold leading-none">&times;</button>
+            </div>
+            <div class="p-6 prose prose-slate max-w-none text-sm">
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 text-blue-900">
+                    <span class="font-bold">🔗 Folder Google Drive Aktif:</span><br>
+                    <a href="https://drive.google.com/drive/folders/16sy-DoM9_McJQjd5599Jh3rS7ji7u4aV?usp=sharing" target="_blank" class="text-blue-700 underline break-all font-semibold hover:text-blue-800">
+                        https://drive.google.com/drive/folders/16sy-DoM9_McJQjd5599Jh3rS7ji7u4aV?usp=sharing
+                    </a>
+                </div>
+
+                <p>Selaras dengan keperluan spesifikasi projek, sistem ini direka untuk menghubungkan penyerahan borang muat naik terus ke Google Drive tanpa mendedahkan kata laluan peribadi di web awam.</p>
+                
+                <h4 class="font-bold text-lg mt-4 mb-2">Logik Teknikal (Di Sebalik Tabir)</h4>
+                <ol class="list-decimal pl-5 space-y-2 mb-4">
+                    <li><strong>Muka Hadapan (Frontend):</strong> Pensyarah menekan butang "Hantar Pindaan". Laman web membungkus fail dokumen tersebut dan menghantarnya ke pelayan (backend).</li>
+                    <li><strong>Akaun Perkhidmatan (Service Account):</strong> Pada pelayan, satu "Akaun Perkhidmatan Google" diwujudkan yang bertindak sebagai pembantu robot digital. Robot ini diberikan kebenaran khusus (Google Drive API v3) untuk melihat dan menyunting folder tertentu (cth: "MQA Workshop Submissions 2026").</li>
+                    <li><strong>Penyerahan (API Call):</strong> Pelayan (Node.js/Express atau Google Apps Script) menyerahkan fail kepada robot menggunakan API tersebut.</li>
+                    <li><strong>Penyimpanan:</strong> Robot memuat naik fail ke dalam Drive dan secara automatik menamakan semula fail bagi tujuan susunan sistematik (cth: <code>[BAK3283] - Amendment - Dr. Sarah.pdf</code>).</li>
+                    <li><strong>Resit Penerimaan:</strong> Google Drive memulangkan pautan fail. Laman web memaparkan status "Selesai" (Hijau) pada papan pemuka pensyarah, manakala pautan fail direkodkan ke dalam Google Sheet untuk rujukan pentadbir.</li>
+                </ol>
+
+                <h4 class="font-bold text-lg mt-4 mb-2">✨ Integrasi API Gemini (AI Assistant)</h4>
+                <p>Aplikasi ini disepadukan dengan model <strong>gemini-2.5-flash-preview-09-2025</strong> menggunakan strategi pemulihan tangkas (exponential backoff) sehingga 5 percubaan sekiranya berlaku had kadar akses (rate limits). Ia melakukan pemprosesan bahasa semulajadi secara langsung bagi membantu pensyarah menstruktur semula kurikulum mereka dengan pantas.</p>
+
+                <div class="bg-slate-100 p-4 rounded-lg mt-6 border border-slate-200">
+                    <p class="font-bold text-slate-700 mb-1">🛠️ Nota Prototaip:</p>
+                    <p class="text-slate-600">Aplikasi interaktif ini pada masa ini menjalankan <strong>simulasi (mock)</strong> penyerahan fail untuk mendemonstrasikan aliran UI/UX dengan sempurna di dalam penyemak imbas (browser) anda, manakala bahagian <strong>Kecerdasan Buatan (Gemini AI) berfungsi secara langsung</strong> untuk memudahkan perancangan pengajaran anda.</p>
+                </div>
+            </div>
+            <div class="p-4 bg-slate-50 border-t border-slate-100 text-right rounded-b-xl">
+                <button id="btn-close-modal-footer" class="bg-slate-800 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition-colors">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // TARGET GOOGLE DRIVE FOLDER URL
+        const DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/16sy-DoM9_McJQjd5599Jh3rS7ji7u4aV?usp=sharing";
+
+        // COMPREHENSIVE MQA DATASET WITH EXACTLY 32 ROWS & REAL LECTURER ASSIGNMENTS
+        const MQA_DATA = [
+            { id: 'c1', courseCode: 'BAK3013', courseName: 'Morfologi I', issueType: 'Isu Pemetaan', description: 'Pemetaan transferable skill pada CLO–PLO tidak tepat.', status: 'pending', owner: 'Nurizan @ Nora Bt. Mohd. Suhaimy' },
+            { id: 'c2', courseCode: 'BAK3023', courseName: 'Morfologi II', issueType: 'Isu Pemetaan, Sinopsis & Rujukan', description: 'CLO tidak relevan dengan kandungan; transferable skill tidak tepat; rujukan tidak mencukupi.', status: 'pending', owner: 'Nurizan @ Nora Bt. Mohd. Suhaimy' },
+            { id: 'c3', courseCode: 'BAK3033', courseName: 'Sintaksis Bahasa Arab I', issueType: 'Isu Pemetaan & Rujukan', description: 'Isu pada pemetaan transferable skill dan rujukan.', status: 'pending', owner: 'Profesor Madya Dr. Linamalini Bt Mat Nafi' },
+            { id: 'c4', courseCode: 'BAK3043', courseName: 'Sintaksis Bahasa Arab 2', issueType: 'Isu Pemetaan & Rujukan', description: 'Transferable skill tidak dinyatakan dan rujukan tidak dikemas kini.', status: 'pending', owner: 'Profesor Madya Dr. Linamalini Bt Mat Nafi' },
+            { id: 'c5', courseCode: 'BAK3053', courseName: 'Fonetik & Fonologi', issueType: 'Isu Rujukan', description: 'Isu rujukan utama.', status: 'pending', owner: 'Nasimah Bt. Wan Harun' },
+            { id: 'c6', courseCode: 'BAK3073', courseName: 'Perkamusan', issueType: 'Isu Rujukan', description: 'Isu rujukan utama.', status: 'pending', owner: 'Nasimah Bt. Wan Harun' },
+            { id: 'c7', courseCode: 'BAK3083', courseName: 'Kemahiran Bertutur dan Mendengar Bahasa Arab', issueType: 'Isu Pemetaan & Penilaian', description: 'Transferable skill tiada; kaedah penilaian tidak sesuai mengukur CLO1 (PLO4).', status: 'pending', owner: 'Mahmoud Abdel Sattar Mahmoud Abou Kahala' },
+            { id: 'c8', courseCode: 'BAK3103', courseName: 'Terjemahan', issueType: 'Isu Sinopsis', description: 'Sinopsis kursus kurang lengkap.', status: 'pending', owner: 'Dr. Hisyamuddin Bin Mohd Yusof' },
+            { id: 'c9', courseCode: 'BAK3113', courseName: 'Semantik & Pragmatik', issueType: 'Isu Sinopsis', description: 'Sinopsis kursus kurang lengkap.', status: 'pending', owner: 'Mohd Ikhwan Bin Mohd Yusof' },
+            { id: 'c10', courseCode: 'BAK3133', courseName: 'Pengajian Bahasa Arab Al-Quran', issueType: 'Isu Rujukan', description: 'Isu rujukan utama 1.', status: 'pending', owner: 'Dr. Mohd Abalkhair Bin Mat Ali' },
+            { id: 'c11', courseCode: 'BAK3143', courseName: 'Pengajian Bahasa Arab Al-Hadith', issueType: 'Isu Pemetaan, Penilaian & Rujukan', description: 'Transferable skill tidak tepat; istilah penilaian tidak formal; rujukan lama.', status: 'pending', owner: 'Dr. Mohd Abalkhair Bin Mat Ali' },
+            { id: 'c12', courseCode: 'BAK3153', courseName: 'Bahasa Arab untuk Pelancongan', issueType: 'Isu Penilaian', description: 'Kaedah penilaian (ujian pertengahan) tidak sejajar dengan CLO.', status: 'pending', owner: 'Rohaidi Bin Habil' },
+            { id: 'c13', courseCode: 'BAK3163', courseName: 'Bahasa Arab untuk Komunikasi', issueType: 'Isu Pemetaan & Rujukan', description: 'Transferable skill tiada; rujukan tidak terkini.', status: 'pending', owner: 'Mohammad Jawwad Bin Md Yusnan' },
+            { id: 'c14', courseCode: 'BAK3173', courseName: 'Bahasa Arab untuk Perniagaan', issueType: 'Isu Pemetaan', description: 'Isu pada pernyataan CLO dan pemetaan transferable skill.', status: 'pending', owner: 'Mohammad Jawwad Bin Md Yusnan' },
+            { id: 'c15', courseCode: 'BAK3183', courseName: 'Bahasa Arab untuk Digital Media', issueType: 'Isu Rujukan', description: 'Isu rujukan utama.', status: 'pending', owner: 'Rohaidi Bin Habil' },
+            { id: 'c16', courseCode: 'BAK3203', courseName: 'Bahasa Arab untuk Kewartawanan', issueType: 'Isu Rujukan', description: 'Isu rujukan utama.', status: 'pending', owner: 'Mohd Ikhwan Bin Mohd Yusof' },
+            { id: 'c17', courseCode: 'BAK3213', courseName: 'Prosa Arab', issueType: 'Isu Pemetaan & Rujukan', description: 'Pemetaan CLO3-PLO5 tidak sesuai; tiada rujukan.', status: 'pending', owner: 'Dr. Hisyamuddin Bin Mohd Yusof' },
+            { id: 'c18', courseCode: 'BAK3223', courseName: 'Pengajaran Bahasa Arab sebagai Bahasa Kedua', issueType: 'Isu Pemetaan & Rujukan', description: 'Isu pemetaan transferable skill dan rujukan.', status: 'pending', owner: 'Rohaidi Bin Habil' },
+            { id: 'c19', courseCode: 'BAK3233', courseName: 'Asas Pembinaan Bahan Pengajaran Untuk Tujuan Khusus', issueType: 'Isu Pemetaan & Rujukan', description: 'Isu pemetaan transferable skill dan rujukan.', status: 'pending', owner: 'Rohaidi Bin Habil' },
+            { id: 'c20', courseCode: 'BAK3243', courseName: 'Analisis Wacana Bahasa Arab', issueType: 'Isu Pemetaan', description: 'Isu pemetaan transferable skill.', status: 'pending', owner: 'Dr. Hisyamuddin Bin Mohd Yusof' },
+            { id: 'c21', courseCode: 'BAK3253', courseName: 'Kaedah Penyelidikan Bahasa Arab Untuk Tujuan Khusus', issueType: 'Isu Pemetaan', description: 'Isu pemetaan transferable skill.', status: 'pending', owner: 'Profesor Madya Dr. Linamalini Bt Mat Nafi' },
+            { id: 'c22', courseCode: 'BAK3266', courseName: 'Projek Tahun Akhir', issueType: 'Isu Pemetaan & Rujukan', description: 'Isu pemetaan transferable skill dan kekurangan rujukan.', status: 'pending', owner: 'Profesor Madya Dr. Linamalini Bt Mat Nafi' },
+            { id: 'c23', courseCode: 'BAK3276', courseName: 'Internship', issueType: 'Isu Pemetaan', description: 'Tiada transferable skill dinyatakan bagi PLO9.', status: 'pending', owner: 'Mohammad Jawwad Bin Md Yusnan' },
+            { id: 'c24', courseCode: 'BAK3283', courseName: 'Kemahiran Membaca Dan Menulis Bahasa Arab', issueType: 'Isu Pemetaan, Penilaian & Rujukan', description: 'Transferable skill tiada; kaedah penilaian PLO4 tidak sesuai; rujukan lama.', status: 'pending', owner: 'Mahmoud Abdel Sattar Mahmoud Abou Kahala' },
+            { id: 'c25', courseCode: 'EBA3023', courseName: 'Bilingualism', issueType: 'Isu Sinopsis & Rujukan', description: 'Sinopsis terlalu ringkas; rujukan tidak terkini.', status: 'pending', owner: 'Rofizi bin Dollah' },
+            { id: 'c26', courseCode: 'EBA3033', courseName: 'Stailistik Bahasa', issueType: 'Isu Rujukan', description: 'Isu rujukan utama.', status: 'pending', owner: 'Dr. Hisyamuddin Bin Mohd Yusof' },
+            { id: 'c27', courseCode: 'EBA3043', courseName: 'Dialektologi', issueType: 'Isu Sinopsis, Pemetaan & Rujukan', description: 'Sinopsis ringkas; transferable skill tiada; rujukan lama.', status: 'pending', owner: 'Rofizi bin Dollah' },
+            { id: 'c28', courseCode: 'EBA3063', courseName: 'Bahasa Arab Untuk Politik Dan Diplomasi', issueType: 'Isu Pemetaan & Rujukan', description: 'Pemetaan PLO5 tidak sesuai; rujukan tidak terkini.', status: 'pending', owner: 'Mahmoud Abdel Sattar Mahmoud Abou Kahala' },
+            { id: 'c29', courseCode: 'EBA3073', courseName: 'Pembacaan Teks Terpilih', issueType: 'Isu Sinopsis, Pemetaan & Rujukan', description: 'Sinopsis tidak lengkap; transferable skill tiada; rujukan lama.', status: 'pending', owner: 'Rofizi bin Dollah' },
+            { id: 'c30', courseCode: 'EBA3083', courseName: 'Bahasa Arab dalam Teks Turath', issueType: 'Isu Pemetaan & Rujukan', description: 'Transferable skill tidak dinyatakan; rujukan tidak terkini.', status: 'pending', owner: 'Nasimah Bt. Wan Harun' },
+            { id: 'c31', courseCode: 'EBA3093', courseName: 'Bahasa Arab Dalam Pengiklanan', issueType: 'Isu Rujukan', description: 'Isu rujukan utama.', status: 'pending', owner: 'Mahmoud Abdel Sattar Mahmoud Abou Kahala' },
+            { id: 'c32', courseCode: 'EBA3053', courseName: 'Bahasa Arab Untuk Perundangan', issueType: 'Isu Sinopsis, Pemetaan & Rujukan', description: 'Isu pada sinopsis, pemetaan dan rujukan.', status: 'pending', owner: 'Mahmoud Abdel Sattar Mahmoud Abou Kahala' }
+        ];
+
+        // API Configuration
+        const apiKey = ""; // Runtime automatically provisions this key
+
+        let state = {
+            currentUser: 'all',
+            currentIssue: 'all',
+            searchQuery: '',
+            courses: [...MQA_DATA],
+            chartInstance: null
+        };
+
+        const DOM = {
+            grid: document.getElementById('course-grid'),
+            emptyState: document.getElementById('empty-state'),
+            userSelector: document.getElementById('user-selector'),
+            issueSelector: document.getElementById('issue-selector'),
+            searchInput: document.getElementById('search-input'),
+            techModal: document.getElementById('tech-modal'),
+            btnTechInfo: document.getElementById('btn-tech-info'),
+            btnCloseModal: document.getElementById('btn-close-modal'),
+            btnCloseModalFooter: document.getElementById('btn-close-modal-footer'),
+            statTotal: document.getElementById('stat-total'),
+            statPending: document.getElementById('stat-pending'),
+            statCompleted: document.getElementById('stat-completed'),
+            toastContainer: document.getElementById('toast-container')
+        };
+
+        // Retry helper with Exponential Backoff
+        async function fetchWithRetry(url, options, maxRetries = 5) {
+            let delay = 1000;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.ok) {
+                        return await response.json();
+                    }
+                    if (response.status === 429 || response.status >= 500) {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2;
+                        continue;
+                    }
+                    throw new Error(`Ralat pelayan: ${response.statusText}`);
+                } catch (error) {
+                    if (i === maxRetries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2;
+                }
+            }
+            throw new Error("Gagal menyambung kepada pelayan AI setelah beberapa cubaan semula.");
+        }
+
+        // Call Gemini Model
+        async function askGemini(prompt, systemInstruction = "") {
+            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }]
+            };
+            if (systemInstruction) {
+                payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+            }
+
+            try {
+                const data = await fetchWithRetry(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || "Tiada maklum balas daripada AI.";
+            } catch (err) {
+                throw new Error("Gagal mendapatkan respons daripada Gemini API. Sila pastikan kunci API anda aktif.");
+            }
+        }
+
+        function initApp() {
+            populateUserSelector();
+            renderDashboard();
+            setupEventListeners();
+        }
+
+        // Dynamically extract unique lecturers and populate the selector dropdown
+        function populateUserSelector() {
+            const uniqueLecturers = [...new Set(state.courses.map(c => c.owner))].sort();
+            uniqueLecturers.forEach(lecturer => {
+                const option = document.createElement('option');
+                option.value = lecturer;
+                option.textContent = lecturer.length > 40 ? lecturer.substring(0, 40) + '...' : lecturer;
+                option.title = lecturer; // Tooltip for full name
+                DOM.userSelector.appendChild(option);
+            });
+        }
+
+        function setupEventListeners() {
+            DOM.userSelector.addEventListener('change', (e) => {
+                state.currentUser = e.target.value;
+                renderDashboard();
+            });
+
+            DOM.issueSelector.addEventListener('change', (e) => {
+                state.currentIssue = e.target.value;
+                renderDashboard();
+            });
+
+            DOM.searchInput.addEventListener('input', (e) => {
+                state.searchQuery = e.target.value.toLowerCase().trim();
+                renderDashboard();
+            });
+
+            DOM.btnTechInfo.addEventListener('click', () => DOM.techModal.classList.remove('hidden'));
+            DOM.btnCloseModal.addEventListener('click', () => DOM.techModal.classList.add('hidden'));
+            DOM.btnCloseModalFooter.addEventListener('click', () => DOM.techModal.classList.add('hidden'));
+            
+            DOM.techModal.addEventListener('click', (e) => {
+                if(e.target === DOM.techModal) DOM.techModal.classList.add('hidden');
+            });
+        }
+
+        function getFilteredCourses() {
+            return state.courses.filter(c => {
+                const matchesUser = (state.currentUser === 'all' || c.owner === state.currentUser);
+                
+                let matchesIssue = true;
+                if (state.currentIssue !== 'all') {
+                    if (state.currentIssue === 'Isu Pemetaan') matchesIssue = c.issueType.includes('Pemetaan');
+                    else if (state.currentIssue === 'Isu Rujukan') matchesIssue = c.issueType.includes('Rujukan');
+                    else if (state.currentIssue === 'Isu Sinopsis') matchesIssue = c.issueType.includes('Sinopsis');
+                    else if (state.currentIssue === 'Isu Penilaian') matchesIssue = (c.issueType.includes('Penilaian') || c.issueType.includes('&') || c.issueType.includes(','));
+                }
+
+                const matchesSearch = (
+                    c.courseCode.toLowerCase().includes(state.searchQuery) ||
+                    c.courseName.toLowerCase().includes(state.searchQuery) ||
+                    c.description.toLowerCase().includes(state.searchQuery) ||
+                    c.owner.toLowerCase().includes(state.searchQuery)
+                );
+
+                return matchesUser && matchesIssue && matchesSearch;
+            });
+        }
+
+        function updateStats(filteredCourses) {
+            const total = filteredCourses.length;
+            const completed = filteredCourses.filter(c => c.status === 'completed').length;
+            const pending = total - completed;
+
+            DOM.statTotal.textContent = total;
+            DOM.statCompleted.textContent = completed;
+            DOM.statPending.textContent = pending;
+
+            updateChart(filteredCourses);
+        }
+
+        function updateChart(courses) {
+            const issueCounts = {};
+            courses.forEach(c => {
+                if(c.status === 'pending') {
+                    let normalizedType = 'Isu Pemetaan';
+                    if (c.issueType.includes('Rujukan') && c.issueType.includes('Sinopsis')) normalizedType = 'Isu Campuran (Sinopsis & Rujukan)';
+                    else if (c.issueType.includes('Rujukan')) normalizedType = 'Isu Rujukan';
+                    else if (c.issueType.includes('Sinopsis')) normalizedType = 'Isu Sinopsis';
+                    else if (c.issueType.includes('Penilaian')) normalizedType = 'Isu Penilaian';
+                    
+                    issueCounts[normalizedType] = (issueCounts[normalizedType] || 0) + 1;
+                }
+            });
+
+            const labels = Object.keys(issueCounts);
+            const data = Object.values(issueCounts);
+
+            if(labels.length === 0) {
+                labels.push("Semua Selesai");
+                data.push(1);
+            }
+
+            const ctx = document.getElementById('issuesChart').getContext('2d');
+            
+            if (state.chartInstance) {
+                state.chartInstance.destroy();
+            }
+
+            state.chartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: labels[0] === "Semua Selesai" 
+                            ? ['#10b981'] 
+                            : ['#3b82f6', '#f43f5e', '#f59e0b', '#8b5cf6', '#06b6d4'],
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: { font: { family: 'sans-serif', size: 11 } } },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    if (label) label += ': ';
+                                    if (context.parsed !== null) label += context.parsed + ' kursus';
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    cutout: '65%'
+                }
+            });
+        }
+
+        function renderDashboard() {
+            const displayCourses = getFilteredCourses();
+            DOM.grid.innerHTML = '';
+            
+            updateStats(displayCourses);
+
+            if (displayCourses.length === 0) {
+                DOM.grid.classList.add('hidden');
+                DOM.emptyState.classList.remove('hidden');
+                return;
+            }
+
+            DOM.grid.classList.remove('hidden');
+            DOM.emptyState.classList.add('hidden');
+
+            displayCourses.forEach(course => {
+                const card = document.createElement('div');
+                const isCompleted = course.status === 'completed';
+                
+                card.className = `bg-white rounded-xl shadow-sm border-l-4 overflow-hidden transition-all duration-300 flex flex-col h-full ${
+                    isCompleted ? 'border-l-emerald-500 border-t border-r border-b border-emerald-100 bg-emerald-50/30' : 'border-l-rose-500 border-t border-r border-b border-slate-200 hover:shadow-md'
+                }`;
+
+                card.innerHTML = `
+                    <div class="p-5 flex-grow flex flex-col">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <span class="text-xs font-bold text-slate-500 tracking-wider uppercase">${course.courseCode}</span>
+                                <h3 class="text-lg font-bold text-slate-800 leading-tight mt-1">${course.courseName}</h3>
+                            </div>
+                            <span class="inline-flex items-center justify-center w-8 h-8 rounded-full ${isCompleted ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}">
+                                ${isCompleted ? '✅' : '❗'}
+                            </span>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <span class="inline-block px-2 py-1 bg-slate-100 text-slate-700 text-[10px] font-semibold rounded mb-2">Penyelaras: ${course.owner}</span>
+                            <p class="text-sm text-slate-600 bg-slate-50 p-3 rounded border border-slate-100 h-full">
+                                <span class="font-semibold text-slate-700 block mb-1">Teguran Panel MQA:</span>
+                                ${course.description}
+                            </p>
+                        </div>
+
+                        <!-- AI Assistant Collapsible Section -->
+                        <div class="mb-5 border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
+                            <button onclick="toggleAiAssistant(event, '${course.id}')" class="w-full flex items-center justify-between px-4 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">
+                                <span class="flex items-center gap-1.5">
+                                    <span>✨</span> AI Pembantu Pindaan
+                                </span>
+                                <span id="caret-${course.id}">▼</span>
+                            </button>
+                            <div id="ai-panel-${course.id}" class="hidden p-3 border-t border-slate-200">
+                                <!-- Navigation tabs for AI panel -->
+                                <div class="flex border-b border-slate-200 mb-3 text-[11px] font-bold">
+                                    <button onclick="switchAiTab(event, '${course.id}', 'suggest')" id="tab-suggest-${course.id}" class="pb-1.5 px-2 border-b-2 border-blue-600 text-blue-600 mr-2">✨ Cadangan Pindaan</button>
+                                    <button onclick="switchAiTab(event, '${course.id}', 'check')" id="tab-check-${course.id}" class="pb-1.5 px-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800">✨ Semak Draf</button>
+                                </div>
+                                
+                                <!-- Tab Content: Suggestions -->
+                                <div id="content-suggest-${course.id}">
+                                    <p class="text-[11px] text-slate-500 mb-2">Biarkan Gemini AI menganalisis ulasan MQA di atas dan menjana contoh rujukan atau struktur kemas kini.</p>
+                                    <button onclick="generateSuggestions(event, '${course.id}', '${course.courseCode}', '${course.courseName}', '${course.description}')" class="w-full bg-blue-600 text-white font-semibold text-xs py-2 px-3 rounded hover:bg-blue-700 flex items-center justify-center gap-1.5 transition-colors">
+                                        <span>✨ Jelas & Cadang Pindaan</span>
+                                    </button>
+                                    <div id="ai-output-suggest-${course.id}" class="hidden mt-3 p-2.5 bg-white border border-slate-200 rounded text-xs text-slate-700 max-h-48 overflow-y-auto custom-scroll whitespace-pre-wrap"></div>
+                                    <button id="btn-copy-suggest-${course.id}" onclick="copyToClipboard(event, 'ai-output-suggest-${course.id}')" class="hidden mt-2 text-[10px] text-blue-600 hover:underline font-medium self-end">Salin Jawapan</button>
+                                </div>
+
+                                <!-- Tab Content: Checker -->
+                                <div id="content-check-${course.id}" class="hidden">
+                                    <p class="text-[11px] text-slate-500 mb-2">Tulis/tampal draf pindaan anda di bawah. AI akan menyemak jika ia menyelesaikan teguran MQA secara penuh.</p>
+                                    <textarea id="draft-input-${course.id}" rows="3" placeholder="Tulis draf rujukan (2020-2026), sinopsis atau pemetaan PLO di sini..." class="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white mb-2"></textarea>
+                                    <button onclick="checkCompliance(event, '${course.id}', '${course.description}')" class="w-full bg-emerald-600 text-white font-semibold text-xs py-2 px-3 rounded hover:bg-emerald-700 flex items-center justify-center gap-1.5 transition-colors">
+                                        <span>✨ Semak Pematuhan Draf</span>
+                                    </button>
+                                    <div id="ai-output-check-${course.id}" class="hidden mt-3 p-2.5 bg-white border border-slate-200 rounded text-xs text-slate-700 max-h-48 overflow-y-auto custom-scroll whitespace-pre-wrap"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-auto">
+                            ${isCompleted ? `
+                                <div class="bg-emerald-100 text-emerald-800 p-3 rounded-lg text-sm flex flex-col items-center justify-center font-medium border border-emerald-200 animate-fadeIn">
+                                    <div class="flex items-center"><span class="mr-2 text-lg">📁</span> Pindaan Telah Dimuat Naik</div>
+                                    <a href="${DRIVE_FOLDER_URL}" target="_blank" class="mt-1 text-[11px] text-blue-700 underline hover:text-blue-800 font-bold">Semak Dalam Google Drive &rarr;</a>
+                                </div>
+                            ` : `
+                                <div class="file-drop-zone p-4 rounded-lg text-center bg-slate-50 relative cursor-pointer" onclick="document.getElementById('file-${course.id}').click()" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event, '${course.id}')">
+                                    <input type="file" id="file-${course.id}" class="hidden-input" accept=".pdf,.doc,.docx" onchange="handleFileSelect(event, '${course.id}')">
+                                    <div id="ui-idle-${course.id}">
+                                        <div class="text-2xl mb-1">📄</div>
+                                        <p class="text-xs text-slate-600 font-medium">Klik atau Seret Dokumen ke Sini</p>
+                                        <p class="text-[10px] text-slate-400 mt-1">(PDF, DOC, DOCX - Maks 10MB)</p>
+                                    </div>
+                                    <div id="ui-selected-${course.id}" class="hidden flex flex-col items-center">
+                                        <div class="text-xl mb-1 text-blue-600">📎</div>
+                                        <p id="filename-${course.id}" class="text-xs text-slate-700 font-bold truncate w-full px-2 mb-2"></p>
+                                        <button onclick="submitAmendment(event, '${course.id}', '${course.courseCode}')" class="bg-blue-600 text-white text-xs px-4 py-2 rounded font-bold hover:bg-blue-700 w-full transition-colors shadow-sm">
+                                            Hantar ke Google Drive
+                                        </button>
+                                    </div>
+                                    <div id="ui-loading-${course.id}" class="hidden flex flex-col items-center py-2">
+                                        <div class="text-sm font-bold text-blue-600 animate-pulse">Menghantar... ⌛</div>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <input type="text" placeholder="Nota tambahan (Pilihan)..." class="w-full text-xs px-3 py-2 border border-slate-200 rounded focus:outline-none focus:border-blue-500 bg-white">
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `;
+                DOM.grid.appendChild(card);
+            });
+        }
+
+        // Accordion toggle for AI panel
+        window.toggleAiAssistant = function(e, id) {
+            e.stopPropagation();
+            const panel = document.getElementById(`ai-panel-${id}`);
+            const caret = document.getElementById(`caret-${id}`);
+            if (panel.classList.contains('hidden')) {
+                panel.classList.remove('hidden');
+                caret.textContent = '▲';
+            } else {
+                panel.classList.add('hidden');
+                caret.textContent = '▼';
+            }
+        };
+
+        // Switch tabs within the AI panel
+        window.switchAiTab = function(e, id, tabType) {
+            e.stopPropagation();
+            const tabSuggest = document.getElementById(`tab-suggest-${id}`);
+            const tabCheck = document.getElementById(`tab-check-${id}`);
+            const contentSuggest = document.getElementById(`content-suggest-${id}`);
+            const contentCheck = document.getElementById(`content-check-${id}`);
+
+            if (tabType === 'suggest') {
+                tabSuggest.className = "pb-1.5 px-2 border-b-2 border-blue-600 text-blue-600 mr-2";
+                tabCheck.className = "pb-1.5 px-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800";
+                contentSuggest.classList.remove('hidden');
+                contentCheck.classList.add('hidden');
+            } else {
+                tabCheck.className = "pb-1.5 px-2 border-b-2 border-blue-600 text-blue-600";
+                tabSuggest.className = "pb-1.5 px-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 mr-2";
+                contentCheck.classList.remove('hidden');
+                contentSuggest.classList.add('hidden');
+            }
+        };
+
+        // AI Feature 1: Generate curriculum suggestions
+        window.generateSuggestions = async function(e, id, code, name, feedback) {
+            e.stopPropagation();
+            const outputDiv = document.getElementById(`ai-output-suggest-${id}`);
+            const copyBtn = document.getElementById(`btn-copy-suggest-${id}`);
+            
+            outputDiv.classList.remove('hidden');
+            outputDiv.innerHTML = `<span class="animate-pulse text-blue-600 font-semibold flex items-center gap-1"><span>✨</span> Sedang merangka cadangan terbaik...</span>`;
+            copyBtn.classList.add('hidden');
+
+            const systemInstruction = "Anda adalah pakar penilai kurikulum universiti dan penasihat penambahbaikan kualiti MQA (Malaysian Qualifications Agency). Berikan penerangan ringkas berserta cadangan konkrit, draf sinopsis berkualiti, cadangan pemetaan PLO yang tepat, atau senarai 3 rujukan akademik terkini (antara tahun 2020-2026) bergantung kepada masalah kursus tersebut. Balas dalam Bahasa Melayu yang profesional, ringkas dan mesra pengguna.";
+            const prompt = `Sila bantu saya membaiki kursus berikut:
+            Kod Kursus: ${code}
+            Nama Kursus: ${name}
+            Isu Utama: ${feedback}
+            
+            Berikan:
+            1. Penjelasan ringkas mengapa isu ini timbul dalam konteks MQA.
+            2. Tindakan pindaan spesifik (Contoh draf teks sinopsis baharu atau contoh rujukan edisi terkini 2020-2026 yang sesuai dengan bidang ini).`;
+
+            try {
+                const response = await askGemini(prompt, systemInstruction);
+                outputDiv.textContent = response;
+                copyBtn.classList.remove('hidden');
+            } catch (err) {
+                outputDiv.innerHTML = `<span class="text-rose-500 font-semibold">${err.message}</span>`;
+            }
+        };
+
+        // AI Feature 2: Check draft compliance against audit issue
+        window.checkCompliance = async function(e, id, feedback) {
+            e.stopPropagation();
+            const draftText = document.getElementById(`draft-input-${id}`).value.trim();
+            const outputDiv = document.getElementById(`ai-output-check-${id}`);
+            
+            if (!draftText) {
+                outputDiv.classList.remove('hidden');
+                outputDiv.innerHTML = `<span class="text-amber-600 font-semibold">Sila tulis atau tampal draf pindaan anda terlebih dahulu sebelum menekan butang semak.</span>`;
+                return;
+            }
+
+            outputDiv.classList.remove('hidden');
+            outputDiv.innerHTML = `<span class="animate-pulse text-emerald-600 font-semibold flex items-center gap-1"><span>✨</span> Menyemak draf kurikulum anda...</span>`;
+
+            const systemInstruction = "Anda adalah pakar audit akademik MQA. Periksa draf yang diberikan oleh pensyarah untuk melihat sama ada draf tersebut berjaya menyelesaikan teguran MQA sepenuhnya. Berikan penilaian peratusan pematuhan (cth: 85% Selesai) berserta ulasan pendek yang membina dan perkara penting yang tertinggal (jika ada). Balas dalam Bahasa Melayu dengan format yang sangat ringkas dan teratur.";
+            const prompt = `Sila semak draf pindaan saya:
+            Teguran MQA Asal: "${feedback}"
+            Draf Pindaan Saya: "${draftText}"
+            
+            Adakah draf saya mematuhi teguran MQA sepenuhnya? Berikan peratusan anggaran pematuhan dan cadangan penambahbaikan ringkas jika masih tidak cukup syarat.`;
+
+            try {
+                const response = await askGemini(prompt, systemInstruction);
+                outputDiv.textContent = response;
+            } catch (err) {
+                outputDiv.innerHTML = `<span class="text-rose-500 font-semibold">${err.message}</span>`;
+            }
+        };
+
+        // Compatibility clipboard action for iframes
+        window.copyToClipboard = function(e, elementId) {
+            e.stopPropagation();
+            const textElement = document.getElementById(elementId);
+            if (!textElement) return;
+
+            const textarea = document.createElement('textarea');
+            textarea.value = textElement.textContent;
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showToast("Cadangan AI berjaya disalin ke papan klip!");
+            } catch (err) {
+                showToast("Gagal menyalin teks.");
+            }
+            document.body.removeChild(textarea);
+        };
+
+        window.handleDrop = function(e, id) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                processFileSelection(e.dataTransfer.files[0], id);
+            }
+        };
+
+        window.handleFileSelect = function(e, id) {
+            if (e.target.files && e.target.files.length > 0) {
+                processFileSelection(e.target.files[0], id);
+            }
+        };
+
+        function processFileSelection(file, id) {
+            document.getElementById(`ui-idle-${id}`).classList.add('hidden');
+            document.getElementById(`ui-selected-${id}`).classList.remove('hidden');
+            document.getElementById(`filename-${id}`).textContent = file.name;
+        }
+
+        window.submitAmendment = function(e, id, courseCode) {
+            e.stopPropagation();
+            
+            document.getElementById(`ui-selected-${id}`).classList.add('hidden');
+            document.getElementById(`ui-loading-${id}`).classList.remove('hidden');
+
+            setTimeout(() => {
+                const courseIndex = state.courses.findIndex(c => c.id === id);
+                if(courseIndex > -1) {
+                    state.courses[courseIndex].status = 'completed';
+                    renderDashboard();
+                    showToastWithAction(`Pindaan bagi ${courseCode} sedia dihantar! Klik untuk sahkan muat naik ke Drive.`, DRIVE_FOLDER_URL);
+                }
+            }, 1200); 
+        };
+
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = 'bg-slate-800 text-white px-4 py-3 rounded shadow-lg text-sm flex items-center transform transition-all duration-300 translate-x-full border-l-4 border-emerald-500';
+            toast.innerHTML = `<span class="mr-2 text-lg">✅</span> ${message}`;
+            
+            DOM.toastContainer.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.add('translate-x-full');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        function showToastWithAction(message, url) {
+            const toast = document.createElement('div');
+            toast.className = 'bg-slate-900 text-white px-4 py-4 rounded-lg shadow-2xl text-xs sm:text-sm flex flex-col gap-2 transform transition-all duration-300 translate-x-full border-l-4 border-emerald-500 max-w-sm';
+            toast.innerHTML = `
+                <div class="flex items-start">
+                    <span class="mr-2 text-base">✅</span>
+                    <div>
+                        <p class="font-bold text-emerald-400">Hampir Selesai!</p>
+                        <p class="text-slate-300 mt-0.5">${message}</p>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-1">
+                    <a href="${url}" target="_blank" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-2.5 py-1 rounded text-xs transition-colors">
+                        Buka Drive & Letak Fail
+                    </a>
+                </div>
+            `;
+            
+            DOM.toastContainer.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.add('translate-x-full');
+                setTimeout(() => toast.remove(), 300);
+            }, 8000);
+        }
+
+        document.addEventListener('DOMContentLoaded', initApp);
+    </script>
+</body>
+</html>
